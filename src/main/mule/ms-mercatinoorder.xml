@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="ba872086-762b-47b3-afca-c7946becda7c" >
+		<http:listener-connection host="0.0.0.0" port="8083" />
+	</http:listener-config>
+	<apikit:config outboundHeadersMapName="outboundHeadersMapName" httpStatusVarName="httpStatus" doc:name="Router" doc:id="61a4140c-e5da-4eaf-8de4-43c7dfca1fa3" name="Router" api="resource::cdf1abc7-b4a4-4c3a-81d1-6185b7fff788:api-ms-mercatino-order:1.0.1:raml:zip:api-ms-mercatino-order.raml" />
+	<db:config name="Database_Config" doc:name="Database Config" doc:id="bf814f53-352d-4385-8446-ad1423176175" >
+		<db:my-sql-connection host="localhost" port="3306" user="root" password="password" database="mercatinodb" />
+	</db:config>
+	<flow name="ms-mercatinoorderFlow" doc:id="9ca78d3c-8bfd-4a5a-ab64-092d016bcce1" >
+		<http:listener doc:name="Listener" doc:id="2c122350-3491-43d5-b458-ba200bb4e843" config-ref="HTTP_Listener_config" path="/*"/>
+		<apikit:router doc:name="APIkit Router" doc:id="9b6bb2e7-42c9-4802-9b9a-b5574b939829" config-ref="Router"/>
+	</flow>
+	<flow name="post:\Order:application\json:Router" doc:id="6e72118b-1f55-41db-bd80-a562883d7661" >
+		<db:insert doc:name="Insert" doc:id="659ba637-1ac0-4f73-8b53-ee79333c166c" config-ref="Database_Config">
+			<db:sql ><![CDATA[INSERT INTO orders(ItemId,UserId,Address)
+VALUES (:ItemId, :UserId, :Address)]]></db:sql>
+			<db:input-parameters ><![CDATA[#[%dw 2.0
+output application/java
+---
+{
+	"UserId":payload.UserId,
+	"ItemId":payload.ItemId,
+	"Address":payload.Address
+}]]]></db:input-parameters>
+		</db:insert>
+	</flow>
+	<flow name="get:\Order\byUser\(user_id)" doc:id="f236befa-d04c-4746-a0ae-2b17508187d3" >
+		<db:select doc:name="Select by ID" doc:id="0b169819-30be-4a0b-9f2e-06a36a3f723f" config-ref="Database_Config">
+			<db:sql ><![CDATA[SELECT *
+FROM orders
+WHERE UserId=:user_id]]></db:sql>
+			<db:input-parameters ><![CDATA[#["user_id":attributes.uriParams.user_id]]]></db:input-parameters>
+		</db:select>
+		<choice doc:name="Choice" doc:id="f43a8862-72b0-47b7-860c-2cf047c4ac7f" >
+			<when expression="#[isEmpty(payload)]" >
+				<ee:transform doc:name="Non trovato" doc:id="70315fd7-af1d-4a9d-ba73-e71a2c8e81bb" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+
+{
+	"meta": {
+		"message": "Failed",
+		"code": -1
+	},
+	"data": {
+		"message": "No Order Found"
+	}
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</when>
+			<otherwise >
+				<ee:transform doc:name="Ordini" doc:id="6b7b6b9b-3a68-44f2-a87c-c48191436aa0" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload map ((item, index) -> 
+{
+	"meta": {
+		"message": "Success",
+		"code": 0
+	},
+	"data": {
+		"message": "Order Found",
+		"User": [{
+			"OrderId":item.OrderId,
+			"Address":item.Address,
+			"Status":item.Status,
+			"Courier":item.Courier,
+			"ItemId":item.ItemID,
+			"UserId":item.UserID	
+		}]
+	}
+} )]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</otherwise>
+		</choice>
+	</flow>
+</mule>
